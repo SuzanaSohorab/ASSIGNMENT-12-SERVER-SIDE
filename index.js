@@ -34,66 +34,96 @@ async function run() {
     const postCollection = client.db("forumDB").collection("posts");
     const commentCollection = client.db("forumDB").collection("comments");
 
-    // Create a new user
+    // ✅ Create a new user
     app.post("/users", async (req, res) => {
-      const user = req.body;
-      console.log("Data in server:", user);
-      const result = await userCollection.insertOne(user);
-      res.send(result);
+      try {
+        const user = req.body;
+        console.log("Data in server:", user);
+        const result = await userCollection.insertOne(user);
+        res.send(result);
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
     });
 
-    // ✅ Create a new post
+    // ✅ Create a new post (with photoUrl from user profile)
     app.post("/posts", async (req, res) => {
-      const post = {
-        ...req.body,
-        createdAt: new Date(),
-        upVote: 0,
-        downVote: 0,
-      };
-      const result = await postCollection.insertOne(post);
-      res.send(result);
+      try {
+        const { authorEmail, ...rest } = req.body;
+
+        // find user to attach profile image
+        const user = await userCollection.findOne({ email: authorEmail });
+
+        const post = {
+          ...rest,
+          authorEmail,
+          authorImage: user?.photoUrl || null, // ✅ include profile pic
+          createdAt: new Date(),
+          upVote: 0,
+          downVote: 0,
+        };
+
+        const result = await postCollection.insertOne(post);
+        res.send(result);
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
     });
 
     // ✅ Get all posts (newest first)
     app.get("/posts", async (req, res) => {
-      const posts = await postCollection.find().sort({ createdAt: -1 }).toArray();
-      res.send(posts);
+      try {
+        const posts = await postCollection.find().sort({ createdAt: -1 }).toArray();
+        res.send(posts);
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
     });
 
     // ✅ Sort posts by popularity (upVote - downVote)
     app.get("/posts/popular", async (req, res) => {
-      const posts = await postCollection
-        .aggregate([
-          { $addFields: { voteDifference: { $subtract: ["$upVote", "$downVote"] } } },
-          { $sort: { voteDifference: -1 } },
-        ])
-        .toArray();
-      res.send(posts);
+      try {
+        const posts = await postCollection
+          .aggregate([
+            { $addFields: { voteDifference: { $subtract: ["$upVote", "$downVote"] } } },
+            { $sort: { voteDifference: -1 } },
+          ])
+          .toArray();
+        res.send(posts);
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
     });
 
     // ✅ Add a comment to a post
     app.post("/comments", async (req, res) => {
-      const comment = {
-        ...req.body,
-        createdAt: new Date(),
-      };
-      const result = await commentCollection.insertOne(comment);
-      res.send(result);
+      try {
+        const comment = {
+          ...req.body,
+          createdAt: new Date(),
+        };
+        const result = await commentCollection.insertOne(comment);
+        res.send(result);
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
     });
 
     // ✅ Get comments for a post
     app.get("/comments/:postId", async (req, res) => {
-      const postId = req.params.postId;
-      const comments = await commentCollection.find({ postId }).toArray();
-      res.send(comments);
+      try {
+        const postId = req.params.postId;
+        const comments = await commentCollection.find({ postId }).toArray();
+        res.send(comments);
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
     });
 
     // ✅ Get all posts by a user
     app.get("/api/posts/user/:email", async (req, res) => {
       try {
-        const posts = await postCollection
-          .find({ authorEmail: req.params.email })
-          .toArray(); // <-- convert cursor to array
+        const posts = await postCollection.find({ authorEmail: req.params.email }).toArray();
         res.json(posts);
       } catch (err) {
         res.status(500).json({ error: err.message });
@@ -114,11 +144,36 @@ async function run() {
       }
     });
 
-    // Ping to confirm connection
+    // ✅ Get user profile by email
+    app.get("/users/:email", async (req, res) => {
+      try {
+        const user = await userCollection.findOne({ email: req.params.email });
+        if (!user) return res.status(404).json({ message: "User not found" });
+        res.send(user);
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    // ✅ Get 3 recent posts by a user
+    app.get("/posts/recent/:email", async (req, res) => {
+      try {
+        const posts = await postCollection
+          .find({ authorEmail: req.params.email })
+          .sort({ createdAt: -1 })
+          .limit(3)
+          .toArray();
+        res.send(posts);
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    // ✅ Test MongoDB connection
     await client.db("admin").command({ ping: 1 });
     console.log("Pinged your deployment. MongoDB is connected.");
-  } finally {
-    // Optional: do not close client here if server keeps running
+  } catch (err) {
+    console.error("Error connecting to MongoDB:", err);
   }
 }
 
