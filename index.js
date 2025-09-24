@@ -46,26 +46,29 @@ async function run() {
       }
     });
 
-    // ✅ Create a new post (with photoUrl from user profile)
+    // ✅ Create a new post
     app.post("/posts", async (req, res) => {
       try {
         const { authorEmail, ...rest } = req.body;
 
-        // find user to attach profile image
+        // Find user to attach profile image if exists
         const user = await userCollection.findOne({ email: authorEmail });
 
         const post = {
           ...rest,
           authorEmail,
-          authorImage: user?.photoUrl || null, // ✅ include profile pic
+          authorImage: user?.photo || rest.authorImage || null,
           createdAt: new Date(),
           upVote: 0,
           downVote: 0,
         };
 
+        console.log("New Post:", post);
+
         const result = await postCollection.insertOne(post);
         res.send(result);
       } catch (err) {
+        console.error("Error in /posts:", err);
         res.status(500).json({ error: err.message });
       }
     });
@@ -90,6 +93,16 @@ async function run() {
           ])
           .toArray();
         res.send(posts);
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    // ✅ Get post count for a user (for AddPost.jsx limit)
+    app.get("/posts/count/:email", async (req, res) => {
+      try {
+        const count = await postCollection.countDocuments({ authorEmail: req.params.email });
+        res.json({ count });
       } catch (err) {
         res.status(500).json({ error: err.message });
       }
@@ -121,7 +134,7 @@ async function run() {
     });
 
     // ✅ Get all posts by a user
-    app.get("/api/posts/user/:email", async (req, res) => {
+    app.get("/posts/user/:email", async (req, res) => {
       try {
         const posts = await postCollection.find({ authorEmail: req.params.email }).toArray();
         res.json(posts);
@@ -131,7 +144,7 @@ async function run() {
     });
 
     // ✅ Delete a post by ID
-    app.delete("/api/posts/:id", async (req, res) => {
+    app.delete("/posts/:id", async (req, res) => {
       try {
         const result = await postCollection.deleteOne({
           _id: new ObjectId(req.params.id),
