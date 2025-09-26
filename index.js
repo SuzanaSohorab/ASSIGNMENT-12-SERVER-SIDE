@@ -188,7 +188,81 @@ async function run() {
   } catch (err) {
     console.error("Error connecting to MongoDB:", err);
   }
-}
+}// ✅ Get all posts (newest first, with pagination + comment count)
+app.get("/posts", async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 5;
+    const skip = (page - 1) * limit;
+
+    const posts = await postCollection.aggregate([
+      {
+        $lookup: {
+          from: "comments",
+          localField: "_id",
+          foreignField: "postId",
+          as: "comments",
+        },
+      },
+      {
+        $addFields: {
+          commentCount: { $size: "$comments" },
+        },
+      },
+      { $sort: { createdAt: -1 } },
+      { $skip: skip },
+      { $limit: limit },
+    ]).toArray();
+
+    const totalPosts = await postCollection.countDocuments();
+    res.json({
+      posts,
+      totalPages: Math.ceil(totalPosts / limit),
+      currentPage: page,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ✅ Sort posts by popularity (upVote - downVote) with pagination + comment count
+app.get("/posts/popular", async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 5;
+    const skip = (page - 1) * limit;
+
+    const posts = await postCollection.aggregate([
+      {
+        $lookup: {
+          from: "comments",
+          localField: "_id",
+          foreignField: "postId",
+          as: "comments",
+        },
+      },
+      {
+        $addFields: {
+          commentCount: { $size: "$comments" },
+          voteDifference: { $subtract: ["$upVote", "$downVote"] },
+        },
+      },
+      { $sort: { voteDifference: -1 } },
+      { $skip: skip },
+      { $limit: limit },
+    ]).toArray();
+
+    const totalPosts = await postCollection.countDocuments();
+    res.json({
+      posts,
+      totalPages: Math.ceil(totalPosts / limit),
+      currentPage: page,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 
 run().catch(console.dir);
 
