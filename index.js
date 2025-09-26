@@ -38,7 +38,6 @@ async function run() {
     app.post("/users", async (req, res) => {
       try {
         const user = req.body;
-        console.log("Data in server:", user);
         const result = await userCollection.insertOne(user);
         res.send(result);
       } catch (err) {
@@ -63,36 +62,87 @@ async function run() {
           downVote: 0,
         };
 
-        console.log("New Post:", post);
-
         const result = await postCollection.insertOne(post);
         res.send(result);
       } catch (err) {
-        console.error("Error in /posts:", err);
         res.status(500).json({ error: err.message });
       }
     });
 
-    // ✅ Get all posts (newest first)
+    // ✅ Get all posts (newest first, with pagination + comment count)
     app.get("/posts", async (req, res) => {
       try {
-        const posts = await postCollection.find().sort({ createdAt: -1 }).toArray();
-        res.send(posts);
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 5;
+        const skip = (page - 1) * limit;
+
+        const posts = await postCollection
+          .aggregate([
+            {
+              $lookup: {
+                from: "comments",
+                localField: "_id",
+                foreignField: "postId",
+                as: "comments",
+              },
+            },
+            {
+              $addFields: {
+                commentCount: { $size: "$comments" },
+              },
+            },
+            { $sort: { createdAt: -1 } },
+            { $skip: skip },
+            { $limit: limit },
+          ])
+          .toArray();
+
+        const totalPosts = await postCollection.countDocuments();
+        res.json({
+          posts,
+          totalPages: Math.ceil(totalPosts / limit),
+          currentPage: page,
+        });
       } catch (err) {
         res.status(500).json({ error: err.message });
       }
     });
 
-    // ✅ Sort posts by popularity (upVote - downVote)
+    // ✅ Sort posts by popularity (upVote - downVote) with pagination + comment count
     app.get("/posts/popular", async (req, res) => {
       try {
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 5;
+        const skip = (page - 1) * limit;
+
         const posts = await postCollection
           .aggregate([
-            { $addFields: { voteDifference: { $subtract: ["$upVote", "$downVote"] } } },
+            {
+              $lookup: {
+                from: "comments",
+                localField: "_id",
+                foreignField: "postId",
+                as: "comments",
+              },
+            },
+            {
+              $addFields: {
+                commentCount: { $size: "$comments" },
+                voteDifference: { $subtract: ["$upVote", "$downVote"] },
+              },
+            },
             { $sort: { voteDifference: -1 } },
+            { $skip: skip },
+            { $limit: limit },
           ])
           .toArray();
-        res.send(posts);
+
+        const totalPosts = await postCollection.countDocuments();
+        res.json({
+          posts,
+          totalPages: Math.ceil(totalPosts / limit),
+          currentPage: page,
+        });
       } catch (err) {
         res.status(500).json({ error: err.message });
       }
@@ -101,7 +151,9 @@ async function run() {
     // ✅ Get post count for a user (for AddPost.jsx limit)
     app.get("/posts/count/:email", async (req, res) => {
       try {
-        const count = await postCollection.countDocuments({ authorEmail: req.params.email });
+        const count = await postCollection.countDocuments({
+          authorEmail: req.params.email,
+        });
         res.json({ count });
       } catch (err) {
         res.status(500).json({ error: err.message });
@@ -126,7 +178,9 @@ async function run() {
     app.get("/comments/:postId", async (req, res) => {
       try {
         const postId = req.params.postId;
-        const comments = await commentCollection.find({ postId }).toArray();
+        const comments = await commentCollection
+          .find({ postId })
+          .toArray();
         res.send(comments);
       } catch (err) {
         res.status(500).json({ error: err.message });
@@ -136,7 +190,9 @@ async function run() {
     // ✅ Get all posts by a user
     app.get("/posts/user/:email", async (req, res) => {
       try {
-        const posts = await postCollection.find({ authorEmail: req.params.email }).toArray();
+        const posts = await postCollection
+          .find({ authorEmail: req.params.email })
+          .toArray();
         res.json(posts);
       } catch (err) {
         res.status(500).json({ error: err.message });
@@ -160,7 +216,9 @@ async function run() {
     // ✅ Get user profile by email
     app.get("/users/:email", async (req, res) => {
       try {
-        const user = await userCollection.findOne({ email: req.params.email });
+        const user = await userCollection.findOne({
+          email: req.params.email,
+        });
         if (!user) return res.status(404).json({ message: "User not found" });
         res.send(user);
       } catch (err) {
@@ -188,82 +246,7 @@ async function run() {
   } catch (err) {
     console.error("Error connecting to MongoDB:", err);
   }
-}// ✅ Get all posts (newest first, with pagination + comment count)
-app.get("/posts", async (req, res) => {
-  try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 5;
-    const skip = (page - 1) * limit;
-
-    const posts = await postCollection.aggregate([
-      {
-        $lookup: {
-          from: "comments",
-          localField: "_id",
-          foreignField: "postId",
-          as: "comments",
-        },
-      },
-      {
-        $addFields: {
-          commentCount: { $size: "$comments" },
-        },
-      },
-      { $sort: { createdAt: -1 } },
-      { $skip: skip },
-      { $limit: limit },
-    ]).toArray();
-
-    const totalPosts = await postCollection.countDocuments();
-    res.json({
-      posts,
-      totalPages: Math.ceil(totalPosts / limit),
-      currentPage: page,
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ✅ Sort posts by popularity (upVote - downVote) with pagination + comment count
-app.get("/posts/popular", async (req, res) => {
-  try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 5;
-    const skip = (page - 1) * limit;
-
-    const posts = await postCollection.aggregate([
-      {
-        $lookup: {
-          from: "comments",
-          localField: "_id",
-          foreignField: "postId",
-          as: "comments",
-        },
-      },
-      {
-        $addFields: {
-          commentCount: { $size: "$comments" },
-          voteDifference: { $subtract: ["$upVote", "$downVote"] },
-        },
-      },
-      { $sort: { voteDifference: -1 } },
-      { $skip: skip },
-      { $limit: limit },
-    ]).toArray();
-
-    const totalPosts = await postCollection.countDocuments();
-    res.json({
-      posts,
-      totalPages: Math.ceil(totalPosts / limit),
-      currentPage: page,
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-
+}
 run().catch(console.dir);
 
 // Start server
