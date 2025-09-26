@@ -1,4 +1,3 @@
-// server.js
 const express = require("express");
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const cors = require("cors");
@@ -50,7 +49,6 @@ async function run() {
       try {
         const { authorEmail, ...rest } = req.body;
 
-        // Find user to attach profile image if exists
         const user = await userCollection.findOne({ email: authorEmail });
 
         const post = {
@@ -91,6 +89,11 @@ async function run() {
                 commentCount: { $size: "$comments" },
               },
             },
+            {
+              $project: {
+                comments: 0, // don’t send whole comment array
+              },
+            },
             { $sort: { createdAt: -1 } },
             { $skip: skip },
             { $limit: limit },
@@ -108,7 +111,7 @@ async function run() {
       }
     });
 
-    // ✅ Sort posts by popularity (upVote - downVote) with pagination + comment count
+    // ✅ Sort posts by popularity (upVote - downVote) with comment count
     app.get("/posts/popular", async (req, res) => {
       try {
         const page = parseInt(req.query.page) || 1;
@@ -131,6 +134,11 @@ async function run() {
                 voteDifference: { $subtract: ["$upVote", "$downVote"] },
               },
             },
+            {
+              $project: {
+                comments: 0,
+              },
+            },
             { $sort: { voteDifference: -1 } },
             { $skip: skip },
             { $limit: limit },
@@ -148,7 +156,7 @@ async function run() {
       }
     });
 
-    // ✅ Get post count for a user (for AddPost.jsx limit)
+    // ✅ Get post count for a user
     app.get("/posts/count/:email", async (req, res) => {
       try {
         const count = await postCollection.countDocuments({
@@ -235,6 +243,83 @@ async function run() {
           .limit(3)
           .toArray();
         res.send(posts);
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    // ✅ Get post details by ID with comments
+    app.get("/posts/:id", async (req, res) => {
+      try {
+        const postId = req.params.id;
+        const post = await postCollection
+          .aggregate([
+            { $match: { _id: new ObjectId(postId) } },
+            {
+              $lookup: {
+                from: "comments",
+                localField: "_id",
+                foreignField: "postId",
+                as: "comments",
+              },
+            },
+            {
+              $addFields: {
+                commentCount: { $size: "$comments" },
+              },
+            },
+          ])
+          .toArray();
+
+        if (!post[0]) return res.status(404).json({ message: "Post not found" });
+        res.json(post[0]);
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    // ✅ Add comment to a specific post
+    app.post("/posts/:id/comments", async (req, res) => {
+      try {
+        const postId = req.params.id;
+        const { authorEmail, commentText } = req.body;
+
+        const comment = {
+          postId: new ObjectId(postId), // make sure it's ObjectId
+          authorEmail,
+          commentText,
+          createdAt: new Date(),
+        };
+
+        const result = await commentCollection.insertOne(comment);
+        res.json({ message: "Comment added", comment: result });
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    // ✅ Upvote a post
+    app.post("/posts/:id/upvote", async (req, res) => {
+      try {
+        const postId = req.params.id;
+        await postCollection.updateOne(
+          { _id: new ObjectId(postId) },
+          { $inc: { upVote: 1 } }
+        );
+        res.json({ message: "Post upvoted" });
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+    // ✅ Downvote a post
+    app.post("/posts/:id/downvote", async (req, res) => {
+      try {
+        const postId = req.params.id;
+        await postCollection.updateOne(
+          { _id: new ObjectId(postId) },
+          { $inc: { downVote: 1 } }
+        );
+        res.json({ message: "Post downvoted" });
       } catch (err) {
         res.status(500).json({ error: err.message });
       }
