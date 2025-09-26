@@ -282,12 +282,13 @@ async function run() {
     app.post("/posts/:id/comments", async (req, res) => {
       try {
         const postId = req.params.id;
-        const { authorEmail, commentText } = req.body;
+        const { authorEmail, commentText ,authorImage} = req.body;
 
         const comment = {
           postId: new ObjectId(postId), // make sure it's ObjectId
           authorEmail,
           commentText,
+          authorImage: authorImage || user?.photo || null, 
           createdAt: new Date(),
         };
 
@@ -324,6 +325,57 @@ async function run() {
         res.status(500).json({ error: err.message });
       }
     });
+  // ✅ Update a comment
+app.put("/comments/:id", async (req, res) => {
+  try {
+    const commentId = req.params.id;
+    const { commentText, userEmail } = req.body; // get logged-in user's email from frontend
+
+    const comment = await commentCollection.findOne({ _id: new ObjectId(commentId) });
+    if (!comment) return res.status(404).json({ message: "Comment not found" });
+
+    // Only comment owner can edit
+    if (comment.authorEmail !== userEmail) {
+      return res.status(403).json({ message: "Not allowed to edit this comment" });
+    }
+
+    await commentCollection.updateOne(
+      { _id: new ObjectId(commentId) },
+      { $set: { commentText, updatedAt: new Date() } }
+    );
+
+    res.json({ message: "Comment updated successfully" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ✅ Delete a comment
+app.delete("/comments/:id", async (req, res) => {
+  try {
+    const commentId = req.params.id;
+    const { userEmail } = req.body; // frontend must send logged-in user's email
+
+    const comment = await commentCollection.findOne({ _id: new ObjectId(commentId) });
+    if (!comment) return res.status(404).json({ message: "Comment not found" });
+
+    const post = await postCollection.findOne({ _id: new ObjectId(comment.postId) });
+    if (!post) return res.status(404).json({ message: "Post not found" });
+
+    // Permission check: comment owner OR post owner
+    if (comment.authorEmail !== userEmail && post.authorEmail !== userEmail) {
+      return res.status(403).json({ message: "Not allowed to delete this comment" });
+    }
+
+    await commentCollection.deleteOne({ _id: new ObjectId(commentId) });
+    res.json({ message: "Comment deleted successfully" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+
 
     // ✅ Test MongoDB connection
     await client.db("admin").command({ ping: 1 });
