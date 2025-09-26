@@ -373,6 +373,25 @@ app.delete("/comments/:id", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+// Example in your Express server
+app.put("/users/membership/:email", async (req, res) => {
+  try {
+    const email = req.params.email;
+    const { membership } = req.body;
+
+    const result = await userCollection.updateOne(
+      { email },
+      { $set: { membership } }
+    );
+
+    if (result.modifiedCount === 0) return res.status(404).json({ message: "User not found" });
+
+    res.json({ message: "Membership updated successfully" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 
 
 
