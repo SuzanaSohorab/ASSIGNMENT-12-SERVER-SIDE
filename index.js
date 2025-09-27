@@ -37,6 +37,8 @@ async function run() {
     app.post("/users", async (req, res) => {
       try {
         const user = req.body;
+        user.membership = "normal";
+        user.badge = "Bronze";
         const result = await userCollection.insertOne(user);
         res.send(result);
       } catch (err) {
@@ -379,9 +381,14 @@ app.put("/users/membership/:email", async (req, res) => {
     const email = req.params.email;
     const { membership } = req.body;
 
+    let badge = "Normal";
+    if (membership === "premium" || membership === "gold") {
+      badge = "Gold";
+    }
+
     const result = await userCollection.updateOne(
       { email },
-      { $set: { membership } }
+      { $set: { membership ,badge} }
     );
 
     if (result.modifiedCount === 0) return res.status(404).json({ message: "User not found" });
