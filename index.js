@@ -37,6 +37,7 @@ async function run() {
     app.post("/users", async (req, res) => {
       try {
         const user = req.body;
+        user.role='user'
         user.membership = "normal";
         user.badge = "Bronze";
         const result = await userCollection.insertOne(user);
@@ -60,6 +61,7 @@ async function run() {
           createdAt: new Date(),
           upVote: 0,
           downVote: 0,
+          
         };
 
         const result = await postCollection.insertOne(post);
@@ -394,6 +396,46 @@ app.put("/users/membership/:email", async (req, res) => {
     if (result.modifiedCount === 0) return res.status(404).json({ message: "User not found" });
 
     res.json({ message: "Membership updated successfully" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+// ✅ Search posts by tag (place BEFORE /posts/:id)
+app.get("/posts/search/keyword", async (req, res) => {
+  try {
+    const keyword = req.query.keyword;
+    console.log("Search keyword:", keyword);
+    if (!keyword) return res.json([]);
+
+    const posts = await postCollection.find({
+      tag: { $regex: new RegExp(keyword.trim(), "i") },
+    }).toArray();
+
+    res.json(posts);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ✅ Get post details by ID (must be after search)
+app.get("/posts/:id", async (req, res) => {
+  try {
+    const postId = req.params.id;
+    const post = await postCollection.aggregate([
+      { $match: { _id: new ObjectId(postId) } },
+      {
+        $lookup: {
+          from: "comments",
+          localField: "_id",
+          foreignField: "postId",
+          as: "comments",
+        },
+      },
+      { $addFields: { commentCount: { $size: "$comments" } } },
+    ]).toArray();
+
+    if (!post[0]) return res.status(404).json({ message: "Post not found" });
+    res.json(post[0]);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
