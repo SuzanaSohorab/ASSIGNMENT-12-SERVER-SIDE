@@ -441,6 +441,64 @@ app.get("/posts/:id", async (req, res) => {
   }
 });
 
+// ✅ Get all users
+app.get("/users", async (req, res) => {
+  try {
+    const users = await userCollection.find().toArray();
+    res.json(users);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ✅ Make user admin
+// ✅ Toggle user role (admin <-> user)
+app.put("/users/toggle-role/:id", async (req, res) => {
+  try {
+    const id = req.params.id;
+
+    const user = await userCollection.findOne({ _id: new ObjectId(id) });
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    const newRole = user.role === "admin" ? "user" : "admin";
+
+    await userCollection.updateOne(
+      { _id: new ObjectId(id) },
+      { $set: { role: newRole } }
+    );
+
+    res.json({ message: `Role updated to ${newRole}`, role: newRole });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+// Report a comment
+app.post("/reports", async (req, res) => {
+  try {
+    const report = {
+      commentId: req.body.commentId,
+      postId: req.body.postId,
+      reporterEmail: req.body.reporterEmail,
+      reason: req.body.reason || "No reason provided",
+      createdAt: new Date(),
+    };
+    const result = await client.db("forumDB").collection("reports").insertOne(report);
+    res.send(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get all reports (for Admin)
+app.get("/reports", async (req, res) => {
+  try {
+    const reports = await client.db("forumDB").collection("reports").find().toArray();
+    res.send(reports);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 
 
 
