@@ -1,22 +1,33 @@
 const express = require("express");
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const cors = require("cors");
-
+const jwt =require('jsonwebtoken');
 const app = express();
+const cookieParser = require('cookie-parser');
 const port = process.env.PORT || 5000;
-
+require('dotenv').config();
 // Middleware
-app.use(cors());
-app.use(express.json());
+app.use(cors({
+  origin:['http://localhost:5173'],
+  credentials:true
 
+}));
+app.use(express.json());
+app.use(cookieParser());
+
+// const logger = (req ,res, next)=>{
+//   console.log('inside milldeware');
+//   next();
+// }
 // Root route
 app.get("/", (req, res) => {
   res.send("Simple forum website is running");
 });
 
 // MongoDB connection
-const uri =
-  "mongodb+srv://forumDB:XnSo18x87U52j8HG@cluster0.joiywm2.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0";
+const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.joiywm2.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
+
+  // "mongodb+srv://forumDB:XnSo18x87U52j8HG@cluster0.joiywm2.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0";
 
 const client = new MongoClient(uri, {
   serverApi: {
@@ -28,10 +39,11 @@ const client = new MongoClient(uri, {
 
 async function run() {
   try {
-    await client.connect();
+    // await client.connect();
     const userCollection = client.db("forumDB").collection("users");
     const postCollection = client.db("forumDB").collection("posts");
     const commentCollection = client.db("forumDB").collection("comments");
+    const announcementCollection = client.db("forumDB").collection("announcements");
 
     // ✅ Create a new user
     app.post("/users", async (req, res) => {
@@ -46,6 +58,43 @@ async function run() {
         res.status(500).json({ error: err.message });
       }
     });
+    //jwt api
+    app.post('/jwt' ,async(req,res)=>{
+      const {email}=req.body;
+      const user ={email};
+      const token =jwt.sign(user, process.env.JWT_SECRET_KEY , {expiresIn:'1h'});
+      //set cookie
+      res.cookie('token', token ,{
+        httpOnly:true,
+        secure:false,
+        sameSite: 'lax'
+      })
+      
+      res.send({success: true});
+
+
+    });
+    //verify token 
+    const verifyJWT = (req, res, next) => {
+  const token = req.cookies?.token;
+
+  if (!token) {
+    return res.status(401).json({ message: 'Unauthorized' });
+  }
+
+  jwt.verify(token, process.env.JWT_SECRET_KEY, (err, decoded) => {
+    if (err) {
+      return res.status(403).json({ message: 'Forbidden' });
+    }
+    req.user = decoded;
+    next();
+  });
+};
+app.get('/posts/secure', verifyJWT, async (req, res) => {
+  res.send({ message: `Hello ${req.user.email}, this is a protected route!` });
+});
+
+
 
     // ✅ Create a new post
     app.post("/posts", async (req, res) => {
@@ -161,16 +210,18 @@ async function run() {
     });
 
     // ✅ Get post count for a user
-    app.get("/posts/count/:email", async (req, res) => {
-      try {
-        const count = await postCollection.countDocuments({
-          authorEmail: req.params.email,
-        });
-        res.json({ count });
-      } catch (err) {
-        res.status(500).json({ error: err.message });
-      }
-    });
+// Get comments for a post
+app.get("/comments/:postId", async (req, res) => {
+  try {
+    const postId = req.params.postId;
+    const comments = await commentCollection
+      .find({ postId: new ObjectId(postId) }) // ✅ fix: convert to ObjectId
+      .toArray();
+    res.send(comments);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
     // ✅ Add a comment to a post
     app.post("/comments", async (req, res) => {
@@ -186,18 +237,18 @@ async function run() {
       }
     });
 
-    // ✅ Get comments for a post
-    app.get("/comments/:postId", async (req, res) => {
-      try {
-        const postId = req.params.postId;
-        const comments = await commentCollection
-          .find({ postId })
-          .toArray();
-        res.send(comments);
-      } catch (err) {
-        res.status(500).json({ error: err.message });
-      }
-    });
+    // // ✅ Get comments for a post
+    // app.get("/comments/:postId", async (req, res) => {
+    //   try {
+    //     const postId = req.params.postId;
+    //     const comments = await commentCollection
+    //       .find({ postId })
+    //       .toArray();
+    //     res.send(comments);
+    //   } catch (err) {
+    //     res.status(500).json({ error: err.message });
+    //   }
+    // });
 
     // ✅ Get all posts by a user
     app.get("/posts/user/:email", async (req, res) => {
@@ -472,28 +523,154 @@ app.put("/users/toggle-role/:id", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-// Report a comment
-app.post("/reports", async (req, res) => {
+app.get("/admin/:email", async (req, res) => {
   try {
-    const report = {
-      commentId: req.body.commentId,
-      postId: req.body.postId,
-      reporterEmail: req.body.reporterEmail,
-      reason: req.body.reason || "No reason provided",
-      createdAt: new Date(),
-    };
-    const result = await client.db("forumDB").collection("reports").insertOne(report);
-    res.send(result);
+    const admin = await userCollection.findOne({ email: req.params.email });
+    if (!admin) return res.status(404).json({ message: "Admin not found" });
+    res.json(admin);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
+// Report a comment
+
+// Report a comment (store post title as well)
+// Report a comment (store post title and reporter name)
+app.post("/reports", async (req, res) => {
+  try {
+    const { commentId, reporterEmail, feedback } = req.body;
+
+    // Fetch the comment
+    const comment = await commentCollection.findOne({ _id: new ObjectId(commentId) });
+    if (!comment) return res.status(404).json({ message: "Comment not found" });
+
+    // Fetch the post for this comment
+    const post = await postCollection.findOne({ _id: new ObjectId(comment.postId) });
+    if (!post) return res.status(404).json({ message: "Post not found" });
+
+    // Fetch reporter's name
+    const reporterUser = await userCollection.findOne({ email: reporterEmail });
+
+    // Create report object
+    const report = {
+      commentId,
+      postId: comment.postId,
+      postTitle: post.title || "No title",
+      reporterEmail,
+      reporterName: reporterUser?.name || "Unknown",
+      reason: feedback || "No reason provided",
+      commentText: comment.commentText || comment.text,
+      commenterEmail: comment.authorEmail || comment.email,
+      createdAt: new Date(),
+      status: "pending",
+    };
+
+    // Insert into reports collection
+    const result = await client.db("forumDB").collection("reports").insertOne(report);
+    res.status(201).json({ message: "Report submitted", report: report });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+
+
+
+
+// Get all reports (for Admin)
 // Get all reports (for Admin)
 app.get("/reports", async (req, res) => {
   try {
-    const reports = await client.db("forumDB").collection("reports").find().toArray();
+    const reports = await client
+      .db("forumDB")
+      .collection("reports")
+      .aggregate([
+        {
+          $lookup: {
+            from: "posts",
+            localField: "postId",
+            foreignField: "_id",
+            as: "post",
+          },
+        },
+        {
+          $unwind: {
+            path: "$post",
+            preserveNullAndEmptyArrays: true,
+          },
+        },
+        {
+          $project: {
+            reporterEmail: 1,
+            reporterName: 1,
+            reason: 1,
+            commentText: 1,
+            commenterEmail: 1,
+            commentId: 1,
+            postId: 1,
+            postTitle: { $ifNull: ["$post.title", "$postTitle"] }, // fallback to stored title
+          },
+        },
+      ])
+      .toArray();
+
     res.send(reports);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+// ✅ Get all announcements (newest first)
+app.get("/announcements", async (req, res) => {
+  try {
+    const announcements = await announcementCollection
+      .find()
+      .sort({ createdAt: -1 })
+      .toArray();
+    res.json(announcements);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+// ✅ Create a new announcement (admin only)
+app.post("/announcements", async (req, res) => {
+  try {
+    const { title, description, authorName, authorEmail, authorImage } = req.body;
+    if (!title || !description || !authorName || !authorEmail) {
+      return res.status(400).json({ message: "All fields are required" });
+    }
+
+    const newAnnouncement = {
+      title,
+      description,
+      authorName,
+      authorEmail,
+      authorImage,
+      createdAt: new Date(),
+    };
+
+    const result = await announcementCollection.insertOne(newAnnouncement);
+    res.status(201).json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+// ✅ Delete an announcement (admin only)
+app.delete("/announcements/:id", async (req, res) => {
+  try {
+    const id = req.params.id;
+    const result = await announcementCollection.deleteOne({ _id: new ObjectId(id) });
+    if (result.deletedCount === 0)
+      return res.status(404).json({ message: "Announcement not found" });
+    res.json({ message: "Announcement deleted successfully" });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -504,8 +681,8 @@ app.get("/reports", async (req, res) => {
 
 
     // ✅ Test MongoDB connection
-    await client.db("admin").command({ ping: 1 });
-    console.log("Pinged your deployment. MongoDB is connected.");
+    // await client.db("admin").command({ ping: 1 });
+    // console.log("Pinged your deployment. MongoDB is connected.");
   } catch (err) {
     console.error("Error connecting to MongoDB:", err);
   }
