@@ -5,7 +5,7 @@ const cors = require('cors')
 const jwt = require('jsonwebtoken')
 const app = express()
 const Stripe = require("stripe");
-const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
+const stripe = Stripe(rocess.env.STRIPE_SECRET_KEY);
 
 
 
