@@ -4,6 +4,11 @@ const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb')
 const cors = require('cors')
 const jwt = require('jsonwebtoken')
 const app = express()
+const Stripe = require("stripe");
+const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
+
+
+
 const cookieParser = require('cookie-parser')
 const port = process.env.PORT || 5000
 // Middleware
@@ -276,6 +281,18 @@ async function run() {
 			try {
 				const user = await userCollection.findOne({
 					email: req.params.email,
+				})
+				if (!user) return res.status(404).json({ message: 'User not found' })
+				res.send(user)
+			} catch (err) {
+				res.status(500).json({ error: err.message })
+			}
+		});
+		app.get('/users/:id', async (req, res) => {
+			try {
+				const postId = req.params.id
+				const user = await userCollection.findOne({
+					_id: new ObjectId(postId),
 				})
 				if (!user) return res.status(404).json({ message: 'User not found' })
 				res.send(user)
@@ -695,6 +712,66 @@ async function run() {
 				res.status(500).json({ error: err.message })
 			}
 		})
+// Create a PaymentIntent
+app.post("/create-payment-intent", async (req, res) => {
+  try {
+    const { amount, currency } = req.body;
+
+    // Stripe requires amount in the smallest currency unit (e.g., cents for USD)
+    const paymentIntent = await stripe.paymentIntents.create({
+      amount, 
+      currency,
+      automatic_payment_methods: {
+        enabled: true,
+      },
+    });
+
+    res.send({
+      clientSecret: paymentIntent.client_secret,
+      id: paymentIntent.id,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+		// Get payment details by PaymentIntent ID
+app.get("/payment/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Fetch PaymentIntent from Stripe
+    const paymentIntent = await stripe.paymentIntents.retrieve(id);
+
+    res.send({
+      id: paymentIntent.id,
+      amount: paymentIntent.amount,
+      currency: paymentIntent.currency,
+      status: paymentIntent.status,
+      created: paymentIntent.created,
+      payment_method: paymentIntent.payment_method,
+      receipt_email: paymentIntent.receipt_email,
+      description: paymentIntent.description,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+app.post("/payment/success", async (req, res) => {
+  try {
+    const { email, membership } = req.body;
+    const result = await userCollection.updateOne(
+      { email },
+      { $set: { membership, badge: membership === "premium" ? "Gold" : "Normal" } }
+    );
+    res.json({ success: true, result });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
 
 		// ✅ Test MongoDB connection
 		// await client.db("admin").command({ ping: 1 });
